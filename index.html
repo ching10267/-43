@@ -1,0 +1,670 @@
+
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>東京富士山之旅 APP</title>
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@300;400;500;600&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- html2pdf.js for PDF Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        morandi: {
+                            bg: '#F7F6F3',
+                            card: '#FFFFFF',
+                            primary: '#8B9A9A',
+                            secondary: '#C4B7A6',
+                            accent: '#DCD6D0',
+                            text: '#3A3A3A',
+                            lightText: '#8E8E8E',
+                            border: '#EAE8E3'
+                        }
+                    },
+                    fontFamily: {
+                        serif: ['"Noto Serif TC"', 'serif'],
+                        sans: ['"Noto Sans TC"', 'sans-serif'],
+                    },
+                    boxShadow: {
+                        'soft': '0 8px 30px rgba(0, 0, 0, 0.04)',
+                        'float': '0 4px 20px rgba(139, 154, 154, 0.15)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { 
+            background-color: #E5E5E5; 
+            display: flex; 
+            justify-content: center; 
+            font-family: 'Noto Sans TC', sans-serif;
+            color: #3A3A3A;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #app-container { 
+            width: 100%; 
+            max-width: 414px; 
+            min-height: 100vh; 
+            background-color: #F7F6F3; 
+            position: relative; 
+            overflow-x: hidden;
+            overflow-y: auto;
+            box-shadow: 0 0 30px rgba(0,0,0,0.05);
+        }
+        @media (min-width: 415px) {
+            #app-container { height: 100vh; border-left: 1px solid #EAE8E3; border-right: 1px solid #EAE8E3; }
+        }
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+        .slide-up-enter-active, .slide-up-leave-active { transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease; }
+        .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); opacity: 0; }
+        .magazine-title { position: relative; display: inline-block; }
+        .magazine-title::after {
+            content: ''; position: absolute; bottom: 4px; left: 0; width: 100%; height: 8px;
+            background-color: rgba(196, 183, 166, 0.3); z-index: -1;
+        }
+        input, select, textarea { -webkit-appearance: none; appearance: none; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body>
+    <div id="app" class="w-full max-w-[414px]">
+        <div id="app-container" class="pb-24">
+            
+            <!-- 匯出 PDF 的全螢幕 Loading 畫面 -->
+            <div v-if="isExporting" class="fixed inset-0 z-[100] flex items-center justify-center bg-morandi-bg/80 backdrop-blur-sm">
+                <div class="flex flex-col items-center">
+                    <i class="fa-solid fa-spinner fa-spin text-4xl text-morandi-primary mb-4"></i>
+                    <p class="text-morandi-text font-serif tracking-widest text-sm">正在產生 PDF...</p>
+                </div>
+            </div>
+
+            <!-- 頂部導覽列 -->
+            <header class="sticky top-0 z-40 bg-morandi-bg/90 backdrop-blur-md px-6 py-4 flex justify-between items-center" data-html2canvas-ignore="true">
+                <div class="font-serif text-lg font-medium tracking-wider text-morandi-text">{{ getPageTitle() }}</div>
+                <div class="flex items-center gap-2">
+                    
+                    <!-- 雲端同步狀態指示器 -->
+                    <div class="mr-1 text-[10px] tracking-widest flex items-center gap-1" :class="{'text-morandi-primary': syncStatus === 'saved', 'text-amber-500': syncStatus === 'saving', 'text-red-400': syncStatus === 'error', 'hidden': syncStatus === 'init'}">
+                        <i v-if="syncStatus === 'saving'" class="fa-solid fa-cloud-arrow-up fa-fade text-sm"></i>
+                        <i v-else-if="syncStatus === 'saved'" class="fa-solid fa-cloud-check text-sm"></i>
+                        <i v-else-if="syncStatus === 'error'" class="fa-solid fa-cloud-xmark text-sm"></i>
+                    </div>
+
+                    <!-- PDF 匯出按鈕 (僅在行程和資訊頁面顯示) -->
+                    <button v-if="['itinerary', 'info'].includes(currentTab)" @click="exportToPDF" class="p-2 transition-colors focus:outline-none text-morandi-text hover:text-morandi-primary" title="匯出為 PDF">
+                        <i class="fa-solid fa-file-pdf text-xl"></i>
+                    </button>
+
+                    <!-- 檢視模式切換 -->
+                    <button @click="isViewMode = !isViewMode" class="p-2 transition-colors focus:outline-none" :class="isViewMode ? 'text-morandi-primary' : 'text-morandi-accent'" title="切換檢視/編輯模式">
+                        <i :class="isViewMode ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash'" class="text-xl"></i>
+                    </button>
+                    
+                    <!-- 錢包狀態 -->
+                    <div class="relative">
+                        <button @click="toggleWalletPopup" class="text-morandi-text p-2 focus:outline-none"><i class="fa-solid fa-wallet text-xl"></i></button>
+                        <transition name="fade">
+                            <div v-if="showWalletPopup" class="absolute right-0 top-10 mt-2 w-48 bg-white rounded-2xl shadow-float p-4 z-50 border border-morandi-border">
+                                <p class="text-xs text-morandi-lightText mb-1 tracking-wide">剩餘預算</p>
+                                <p class="text-lg font-serif font-semibold text-morandi-text">¥ {{ formatMoney(remainingBudgetJPY) }}</p>
+                                <p class="text-[10px] text-morandi-lightText mt-1 text-right">約 TWD {{ formatMoney(Math.round(remainingBudgetJPY * exchangeRate)) }}</p>
+                            </div>
+                        </transition>
+                    </div>
+                </div>
+            </header>
+
+            <main id="export-content" class="px-6 relative min-h-[80vh] bg-morandi-bg">
+                <transition name="fade" mode="out-in">
+                    <!-- 封面頁面 -->
+                    <div v-if="currentTab === 'cover'" key="cover" class="pt-4 pb-10">
+                        <div class="rounded-3xl overflow-hidden shadow-soft relative mb-8 aspect-[4/5] bg-gray-200">
+                            <img src="https://images.unsplash.com/photo-1542931287-023b922fa89b?q=80&w=1000&auto=format&fit=crop" alt="富士山" class="w-full h-full object-cover">
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent"></div>
+                            <div class="absolute bottom-8 left-6 right-6 text-white">
+                                <p class="text-xs tracking-[0.2em] mb-2 opacity-80 uppercase">Tokyo · Mt. Fuji</p>
+                                <h1 class="text-4xl font-serif tracking-widest mb-3 font-medium leading-tight">東京富士山<br>之旅</h1>
+                                <div class="w-10 h-[1px] bg-white mb-3"></div>
+                                <p class="text-sm font-light tracking-wider opacity-90">2027/3/11 - 3/15</p>
+                            </div>
+                        </div>
+                        <div class="px-2">
+                            <h2 class="font-serif text-lg text-morandi-text mb-4 magazine-title tracking-widest">關於這趟旅程</h2>
+                            <p class="text-sm text-morandi-lightText leading-relaxed tracking-wide text-justify">遠離都市的塵囂，走進森羅萬象的富士山麓。這五天，我們將放慢腳步，在日式的靜謐與現代的繁華中尋找平衡。</p>
+                        </div>
+                    </div>
+
+                    <!-- 行程頁面 -->
+                    <div v-else-if="currentTab === 'itinerary'" key="itinerary" class="pt-2">
+                        <!-- 為 PDF 產生顯示的標題 -->
+                        <h2 class="font-serif text-2xl text-morandi-text mb-6 tracking-widest hidden html2pdf__title">第 {{ selectedDay }} 天行程</h2>
+
+                        <div class="flex overflow-x-auto space-x-3 pb-4 mb-6 hide-scrollbar" data-html2canvas-ignore="true">
+                            <button v-for="day in 5" :key="day" @click="selectedDay = day" class="flex-shrink-0 px-5 py-2 rounded-full border transition-all text-sm" :class="selectedDay === day ? 'bg-morandi-primary text-white border-transparent' : 'bg-white text-morandi-lightText border-morandi-border'">第 {{ day }} 天</button>
+                        </div>
+                        <div class="relative border-l border-morandi-border ml-4 space-y-8 pb-10">
+                            <div v-if="filteredItinerary.length === 0" class="pl-8 text-sm text-morandi-lightText italic">尚未新增行程...</div>
+                            <div v-for="item in filteredItinerary" :key="item.id" class="relative pl-8" :class="!isViewMode ? 'cursor-pointer' : ''" @click="!isViewMode && openActionModal('itinerary', item)">
+                                <div class="absolute -left-[17px] top-1 w-8 h-8 rounded-full bg-white border border-morandi-border flex items-center justify-center text-morandi-primary"><i :class="getCategoryIcon(item.category)" class="text-xs"></i></div>
+                                <div class="bg-white rounded-2xl p-4 shadow-sm border border-transparent" :class="!isViewMode ? 'hover:border-morandi-accent' : ''">
+                                    <div class="flex justify-between items-start mb-2">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-xs text-morandi-primary font-medium bg-morandi-primary/10 px-2 py-1 rounded-md">{{ item.time }}</span>
+                                            <span class="text-[10px] text-morandi-secondary font-medium">{{ item.category }}</span>
+                                        </div>
+                                        <span v-if="item.duration" class="text-[10px] text-morandi-lightText"><i class="fa-regular fa-clock mr-1"></i>{{ item.duration }}</span>
+                                    </div>
+                                    <h3 class="text-base font-serif text-morandi-text">{{ item.title }}</h3>
+                                    <p v-if="item.note" class="text-xs text-morandi-lightText mt-1">{{ item.note }}</p>
+                                </div>
+                            </div>
+                        </div>
+                        <button v-if="!isViewMode" @click="openFormModal('itinerary')" class="fixed bottom-24 right-6 w-12 h-12 bg-morandi-primary text-white rounded-full shadow-float flex items-center justify-center z-30" data-html2canvas-ignore="true"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+
+                    <!-- 資訊頁面 -->
+                    <div v-else-if="currentTab === 'info'" key="info" class="pt-2 pb-24">
+                        <!-- 為 PDF 產生顯示的標題 -->
+                        <h2 class="font-serif text-2xl text-morandi-text mb-6 tracking-widest hidden html2pdf__title">旅遊資訊</h2>
+
+                        <div class="bg-white rounded-3xl p-5 shadow-soft mb-6 border border-morandi-border flex justify-between items-center" :class="!isViewMode ? 'cursor-pointer' : ''" @click="!isViewMode && openFormModal('rate')">
+                            <div class="flex items-center gap-4">
+                                <div class="w-10 h-10 rounded-full bg-morandi-secondary/20 flex items-center justify-center text-morandi-secondary"><i class="fa-solid fa-money-bill-transfer"></i></div>
+                                <div>
+                                    <p class="text-xs text-morandi-lightText mb-1">目前匯率 (日圓 : 台幣)</p>
+                                    <p class="text-lg font-serif font-medium">1 : <span class="text-morandi-primary">{{ exchangeRate.toFixed(3) }}</span></p>
+                                </div>
+                            </div>
+                            <i v-if="!isViewMode" class="fa-solid fa-pen text-morandi-accent text-sm" data-html2canvas-ignore="true"></i>
+                        </div>
+
+                        <h2 class="font-serif text-base text-morandi-text mb-4 ml-2 magazine-title tracking-widest">航班資訊</h2>
+                        <div class="space-y-4 mb-8">
+                            <div v-if="flights.length === 0" class="text-sm text-morandi-lightText italic ml-2">尚未新增航班...</div>
+                            <div v-for="f in flights" :key="f.id" class="bg-white rounded-3xl p-4 shadow-soft border border-morandi-border relative" :class="!isViewMode ? 'cursor-pointer' : ''" @click="!isViewMode && openActionModal('flight', f)">
+                                <div class="flex justify-between items-center mb-3">
+                                    <div class="flex items-center gap-2">
+                                        <div class="bg-morandi-primary/10 text-morandi-primary text-[10px] px-2 py-0.5 rounded-md">{{ f.date }}</div>
+                                        <div v-if="f.terminal" class="bg-morandi-secondary/10 text-morandi-secondary text-[10px] px-2 py-0.5 rounded-md font-medium">{{ f.terminal }} 航廈</div>
+                                    </div>
+                                    <span class="text-xs font-medium text-morandi-lightText">{{ f.flightNumber }}</span>
+                                </div>
+                                <div class="flex items-center text-xl font-serif mb-1 gap-2">
+                                    <span class="flex-1 text-center font-medium text-morandi-text">{{ f.departureCode }}</span>
+                                    <div class="flex flex-col items-center flex-none w-16">
+                                        <i class="fa-solid fa-plane-departure text-morandi-secondary text-sm"></i>
+                                    </div>
+                                    <span class="flex-1 text-center font-medium text-morandi-text">{{ f.arrivalCode }}</span>
+                                </div>
+                                <div class="flex justify-between text-sm text-morandi-lightText px-0 mb-4">
+                                    <span class="flex-1 text-center">{{ f.depTime }}</span>
+                                    <span class="flex-none w-16 text-center text-[10px] self-center">{{ f.flightDuration }}</span>
+                                    <span class="flex-1 text-center">{{ f.arrTime }}</span>
+                                </div>
+                                <div class="flex items-center justify-between border-t border-morandi-border pt-3">
+                                    <div class="flex gap-4">
+                                        <div class="flex items-center gap-1.5 text-[10px] text-morandi-lightText"><i class="fa-solid fa-briefcase text-morandi-secondary"></i><span>手提 {{ f.cabinBaggage }}kg</span></div>
+                                        <div class="flex items-center gap-1.5 text-[10px] text-morandi-lightText"><i class="fa-solid fa-suitcase-rolling text-morandi-secondary"></i><span>托運 {{ f.checkedBaggage }}kg</span></div>
+                                    </div>
+                                    <div v-if="f.airline" class="text-[10px] text-morandi-lightText tracking-wider">{{ f.airline }}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <h2 class="font-serif text-base text-morandi-text mb-4 ml-2 magazine-title tracking-widest">住宿資訊</h2>
+                        <div class="space-y-4 mb-8">
+                            <div v-if="accommodations.length === 0" class="text-sm text-morandi-lightText italic ml-2">尚未新增住宿...</div>
+                            <div v-for="h in accommodations" :key="h.id" class="bg-white rounded-3xl p-5 shadow-soft border border-morandi-border" :class="!isViewMode ? 'cursor-pointer' : ''" @click="!isViewMode && openActionModal('accommodation', h)">
+                                <h3 class="text-lg font-serif mb-2">{{ h.name }}</h3>
+                                <div class="space-y-2 text-sm text-morandi-lightText">
+                                    <p><i class="fa-solid fa-location-dot mr-2 text-morandi-secondary"></i>{{ h.address }}</p>
+                                    <div class="flex justify-between pt-2 mt-2 border-t border-morandi-border/50 text-xs"><span>入住: {{ h.checkIn }}</span><span>退房: {{ h.checkOut }}</span></div>
+                                    <p v-if="h.note" class="text-xs mt-1 italic border-l-2 border-morandi-accent pl-2">{{ h.note }}</p>
+                                </div>
+                            </div>
+                        </div>
+                        <button v-if="!isViewMode" @click="openAddInfoSheet" class="fixed bottom-24 right-6 w-12 h-12 bg-morandi-primary text-white rounded-full shadow-float flex items-center justify-center z-30" data-html2canvas-ignore="true"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+
+                    <!-- 記帳頁面 -->
+                    <div v-else-if="currentTab === 'accounting'" key="accounting" class="pt-2 pb-24 min-h-[85vh] flex flex-col">
+                        <div class="bg-morandi-primary text-white rounded-3xl px-5 py-4 shadow-float mb-5 relative overflow-hidden shrink-0">
+                            <div class="relative z-10">
+                                <div class="flex justify-between items-start mb-2">
+                                    <div class="text-[10px] tracking-wider pt-0.5 uppercase">剩餘預算 (日圓)</div>
+                                    <button @click="openFormModal('budget')" class="text-white/70 p-0.5 hover:text-white transition-colors"><i class="fa-solid fa-pen text-xs"></i></button>
+                                </div>
+                                <h2 class="text-3xl font-serif font-medium mb-0.5 tracking-wider">¥{{ formatMoney(remainingBudgetJPY) }}</h2>
+                                <div class="flex justify-between items-end mb-2">
+                                    <p class="text-[10px] text-white/80">總預算 ¥{{ formatMoney(budgetJPY) }}</p>
+                                    <p class="text-[10px] text-white/60">約台幣 {{ formatMoney(Math.round(remainingBudgetJPY * exchangeRate)) }}</p>
+                                </div>
+                                <div class="h-1 w-full bg-white/20 rounded-full overflow-hidden">
+                                    <div class="h-full bg-white rounded-full transition-all" :style="{ width: budgetPercentage + '%' }"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex overflow-x-auto space-x-3 pb-2 mb-4 hide-scrollbar shrink-0">
+                            <button @click="expenseFilter = 'all'" class="px-4 py-2 rounded-full text-xs font-medium border shrink-0" :class="expenseFilter === 'all' ? 'bg-morandi-primary text-white border-transparent' : 'bg-white text-morandi-lightText border-morandi-border'">全部</button>
+                            <button v-for="d in 5" :key="d" @click="expenseFilter = d" class="px-4 py-2 rounded-full text-xs font-medium border shrink-0" :class="expenseFilter === d ? 'bg-morandi-primary text-white border-transparent' : 'bg-white text-morandi-lightText border-morandi-border'">第 {{ d }} 天</button>
+                        </div>
+
+                        <div class="space-y-3 shrink-0">
+                            <div v-for="e in filteredExpenses" :key="e.id" class="bg-white rounded-2xl p-4 shadow-sm flex items-center justify-between cursor-pointer border border-transparent hover:border-morandi-accent transition-colors" @click="openActionModal('expense', e)">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-10 h-10 rounded-full bg-morandi-bg flex items-center justify-center text-morandi-primary border border-morandi-border"><i :class="getCategoryIcon(e.category)"></i></div>
+                                    <div>
+                                        <h4 class="text-sm font-medium">{{ e.title }}</h4>
+                                        <p class="text-[10px] text-morandi-lightText">第 {{ e.day }} 天 · {{ e.category }}</p>
+                                        <p v-if="e.note" class="text-[10px] text-morandi-accent italic mt-0.5">{{ e.note }}</p>
+                                    </div>
+                                </div>
+                                <div class="text-right"><p class="text-base font-serif font-medium">¥{{ formatMoney(e.amountJPY) }}</p></div>
+                            </div>
+                        </div>
+
+                        <div 
+                            @click="openFormModal('expense')" 
+                            class="flex-grow mt-4 rounded-3xl border-2 border-dashed border-morandi-border/30 flex flex-col items-center justify-center min-h-[150px] text-morandi-accent hover:border-morandi-primary/30 transition-colors cursor-pointer group"
+                        >
+                            <i class="fa-solid fa-plus-circle text-2xl mb-2 group-hover:text-morandi-primary transition-colors"></i>
+                            <span class="text-xs tracking-widest font-light">點擊此處新增記帳項目</span>
+                        </div>
+
+                        <button v-if="!isViewMode" @click="openFormModal('expense')" class="fixed bottom-24 right-6 w-12 h-12 bg-morandi-primary text-white rounded-full shadow-float flex items-center justify-center z-30" data-html2canvas-ignore="true"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+                </transition>
+            </main>
+
+            <!-- 底部導覽列 -->
+            <nav class="fixed bottom-0 w-full max-w-[414px] bg-white/90 backdrop-blur-lg border-t border-morandi-border pt-2 px-6 pb-6 z-40 rounded-t-3xl shadow-lg" data-html2canvas-ignore="true">
+                <div class="flex justify-between items-center">
+                    <button v-for="tab in tabs" :key="tab.id" @click="currentTab = tab.id" class="flex flex-col items-center gap-1.5 w-16" :class="currentTab === tab.id ? 'text-morandi-primary' : 'text-morandi-accent'">
+                        <i :class="tab.icon" class="text-xl"></i>
+                        <span class="text-[10px] tracking-widest">{{ tab.name }}</span>
+                    </button>
+                </div>
+            </nav>
+
+            <!-- 彈窗系統 -->
+            <transition name="slide-up">
+                <div v-if="activeModal === 'actionSheet'" class="fixed inset-0 z-50 flex items-end bg-black/40 backdrop-blur-sm" @click.self="closeModal" data-html2canvas-ignore="true">
+                    <div class="bg-white w-full max-w-[414px] rounded-t-3xl p-6 pb-10">
+                        <h3 class="text-center font-serif text-lg mb-6">{{ selectedItemTitle }}</h3>
+                        <div class="space-y-3">
+                            <button @click="handleEdit" class="w-full py-4 bg-morandi-bg rounded-2xl text-sm hover:bg-morandi-border transition-colors">編輯內容</button>
+                            <button @click="handleDelete" class="w-full py-4 bg-red-50 text-red-500 rounded-2xl text-sm hover:bg-red-100 transition-colors">刪除項目</button>
+                            <button @click="closeModal" class="w-full py-4 text-morandi-lightText text-sm">取消</button>
+                        </div>
+                    </div>
+                </div>
+            </transition>
+
+            <transition name="slide-up">
+                <div v-if="activeModal === 'addInfoSheet'" class="fixed inset-0 z-50 flex items-end bg-black/40 backdrop-blur-sm" @click.self="closeModal" data-html2canvas-ignore="true">
+                    <div class="bg-white w-full max-w-[414px] rounded-t-3xl p-6 pb-10">
+                        <h3 class="text-center font-serif text-lg mb-6">新增旅遊資訊</h3>
+                        <div class="space-y-3">
+                            <button @click="openFormModal('flight')" class="w-full py-4 bg-morandi-bg rounded-2xl text-sm hover:bg-morandi-border transition-colors">新增航班</button>
+                            <button @click="openFormModal('accommodation')" class="w-full py-4 bg-morandi-bg rounded-2xl text-sm hover:bg-morandi-border transition-colors">新增住宿</button>
+                            <button @click="closeModal" class="w-full py-4 text-morandi-lightText text-sm">取消</button>
+                        </div>
+                    </div>
+                </div>
+            </transition>
+
+            <transition name="slide-up">
+                <div v-if="isFormModalOpen" class="fixed inset-0 z-50 flex items-end bg-black/40 backdrop-blur-sm" @click.self="closeModal" data-html2canvas-ignore="true">
+                    <div class="bg-white w-full max-w-[414px] h-[80vh] rounded-t-3xl flex flex-col shadow-2xl">
+                        <div class="px-6 py-4 flex justify-between items-center border-b border-morandi-border shrink-0">
+                            <button @click="closeModal" class="text-morandi-lightText"><i class="fa-solid fa-xmark text-lg"></i></button>
+                            <h3 class="font-serif text-lg">{{ formTitle }}</h3>
+                            <button @click="saveForm" class="text-morandi-primary font-medium tracking-widest">儲存</button>
+                        </div>
+                        <div class="p-6 overflow-y-auto flex-1 space-y-5">
+                            <template v-if="formType === 'rate'">
+                                <label class="text-xs text-morandi-lightText">匯率 (1 日圓 = ? 台幣)</label>
+                                <input type="number" step="0.001" v-model="formData.rate" class="w-full border-b py-3 text-2xl font-serif focus:outline-none">
+                            </template>
+                            <template v-else-if="formType === 'budget'">
+                                <label class="text-xs text-morandi-lightText">總預算 (日圓)</label>
+                                <input type="number" v-model="formData.budgetJPY" class="w-full border-b py-3 text-2xl font-serif focus:outline-none">
+                            </template>
+                            <template v-else-if="formType === 'itinerary'">
+                                <div class="space-y-6">
+                                    <div class="flex gap-4">
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">種類：</label><select v-model="formData.category" class="w-full bg-morandi-bg rounded-xl py-3 px-4 focus:outline-none text-sm"><option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option></select></div>
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">天數：</label><select v-model="formData.day" class="w-full bg-morandi-bg rounded-xl py-3 px-4 focus:outline-none text-sm"><option v-for="d in 5" :key="d" :value="d">第 {{ d }} 天</option></select></div>
+                                    </div>
+                                    <div><label class="text-xs text-morandi-lightText block mb-1">名稱：</label><input type="text" v-model="formData.title" class="w-full border-b py-2 focus:outline-none" placeholder="輸入行程標題"></div>
+                                    <div class="flex gap-4">
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">時間選擇：</label><input type="time" v-model="formData.time" class="w-full bg-morandi-bg rounded-xl py-3 px-4 focus:outline-none"></div>
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">花費時間：</label><input type="text" v-model="formData.duration" class="w-full border-b py-2 focus:outline-none mt-1" placeholder="例如：1小時"></div>
+                                    </div>
+                                    <div><label class="text-xs text-morandi-lightText block mb-1">備註：</label><textarea v-model="formData.note" class="w-full bg-morandi-bg p-3 rounded-xl focus:outline-none min-h-[100px]" placeholder="交通方式或注意事項..."></textarea></div>
+                                </div>
+                            </template>
+                            <template v-else-if="formType === 'flight'">
+                                <div class="space-y-6">
+                                    <div class="flex gap-4">
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">航班：</label><input type="text" v-model="formData.flightNumber" class="w-full border-b py-2 text-lg focus:outline-none" placeholder="IT200"></div>
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">航廈：</label><input type="text" v-model="formData.terminal" class="w-full border-b py-2 text-lg focus:outline-none" placeholder="T1"></div>
+                                    </div>
+                                    <div><label class="text-xs text-morandi-lightText block mb-1">航空公司：</label><input type="text" v-model="formData.airline" class="w-full border-b py-2 focus:outline-none" placeholder="台灣虎航"></div>
+                                    <div class="flex gap-4">
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">出發：</label><input type="text" v-model="formData.departureCode" class="w-full border-b py-2 uppercase focus:outline-none font-serif" placeholder="TPE"></div>
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">到達：</label><input type="text" v-model="formData.arrivalCode" class="w-full border-b py-2 uppercase focus:outline-none font-serif" placeholder="NRT"></div>
+                                    </div>
+                                    <div class="flex gap-4">
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">出發時間：</label><input type="time" v-model="formData.depTime" class="w-full bg-morandi-bg rounded-xl py-3 px-4 focus:outline-none"></div>
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">抵達時間：</label><input type="time" v-model="formData.arrTime" class="w-full bg-morandi-bg rounded-xl py-3 px-4 focus:outline-none"></div>
+                                    </div>
+                                    <div><label class="text-xs text-morandi-lightText block mb-1">飛行時間：</label><input type="text" v-model="formData.flightDuration" class="w-full border-b py-2 focus:outline-none" placeholder="3小時"></div>
+                                    <div class="flex gap-4">
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">手提行李(kg)：</label><input type="number" v-model="formData.cabinBaggage" class="w-full border-b py-2 focus:outline-none"></div>
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">托運行李(kg)：</label><input type="number" v-model="formData.checkedBaggage" class="w-full border-b py-2 focus:outline-none"></div>
+                                    </div>
+                                    <div><label class="text-xs text-morandi-lightText block mb-1">日期：</label><input type="date" v-model="formData.date" class="w-full bg-morandi-bg rounded-xl py-3 px-4 focus:outline-none"></div>
+                                </div>
+                            </template>
+                            <template v-else-if="formType === 'expense'">
+                                <div class="space-y-6">
+                                    <div class="flex gap-4">
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">種類：</label><select v-model="formData.category" class="w-full bg-morandi-bg rounded-xl py-3 px-4 focus:outline-none text-sm"><option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option></select></div>
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">天數：</label><select v-model="formData.day" class="w-full bg-morandi-bg rounded-xl py-3 px-4 focus:outline-none text-sm"><option v-for="d in 5" :key="d" :value="d">第 {{ d }} 天</option></select></div>
+                                    </div>
+                                    <div><label class="text-xs text-morandi-lightText block mb-1">金額：</label><input type="number" v-model="formData.amountJPY" class="w-full border-b py-3 text-2xl font-serif focus:outline-none" placeholder="0"></div>
+                                    <div><label class="text-xs text-morandi-lightText block mb-1">項目：</label><input type="text" v-model="formData.title" class="w-full border-b py-2 focus:outline-none" placeholder="項目名稱"></div>
+                                    <div><label class="text-xs text-morandi-lightText block mb-1">備註：</label><textarea v-model="formData.note" class="w-full bg-morandi-bg p-3 rounded-xl focus:outline-none min-h-[100px]" placeholder="輸入詳細資訊..."></textarea></div>
+                                </div>
+                            </template>
+                            <template v-else-if="formType === 'accommodation'">
+                                <div class="space-y-6">
+                                    <div><label class="text-xs text-morandi-lightText block mb-1">住宿：</label><input type="text" v-model="formData.name" class="w-full border-b py-2 focus:outline-none" placeholder="飯店名稱"></div>
+                                    <div><label class="text-xs text-morandi-lightText block mb-1">地址：</label><input type="text" v-model="formData.address" class="w-full border-b py-2 focus:outline-none" placeholder="完整地址"></div>
+                                    <div class="flex gap-4">
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">入住：</label><input type="time" v-model="formData.checkIn" class="w-full bg-morandi-bg p-3 rounded-xl focus:outline-none"></div>
+                                        <div class="flex-1"><label class="text-xs text-morandi-lightText block mb-1">退房：</label><input type="time" v-model="formData.checkOut" class="w-full bg-morandi-bg p-3 rounded-xl focus:outline-none"></div>
+                                    </div>
+                                    <div><label class="text-xs text-morandi-lightText block mb-1">備註：</label><textarea v-model="formData.note" class="w-full bg-morandi-bg p-3 rounded-xl focus:outline-none min-h-[100px]" placeholder="入住編號 or 特殊需求..."></textarea></div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </transition>
+        </div>
+    </div>
+
+    <!-- 加入匯出 PDF 時顯示標題的自訂樣式 -->
+    <style>
+        .html2pdf__title { display: none; }
+    </style>
+
+    <!-- 匯入 Firebase SDK 模組 -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+        import { getFirestore, doc, setDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+
+        const { createApp, ref, computed, watch, onMounted } = window.Vue;
+        
+        createApp({
+            setup() {
+                const currentTab = ref('cover');
+                const isViewMode = ref(false);
+                const isExporting = ref(false);
+                
+                const syncStatus = ref('init'); // init, saving, saved, error
+                const isSyncingFromCloud = ref(false); // 避免本地與雲端無限循環儲存
+
+                const tabs = [
+                    { id: 'cover', name: '封面', icon: 'fa-regular fa-image' },
+                    { id: 'itinerary', name: '行程', icon: 'fa-regular fa-map' },
+                    { id: 'info', name: '資訊', icon: 'fa-regular fa-compass' },
+                    { id: 'accounting', name: '記帳', icon: 'fa-solid fa-calculator' }
+                ];
+                const categories = ['景點', '交通', '餐飲', '購物', '住宿', '其他'];
+                const showWalletPopup = ref(false);
+                const expenseFilter = ref('all');
+                const selectedDay = ref(1);
+
+                // --- 預設響應式資料 ---
+                const exchangeRate = ref(0.21);
+                const budgetJPY = ref(160000);
+                const itinerary = ref([
+                    { id: 1, day: 1, time: '10:35', duration: '1小時', category: '交通', title: '抵達成田機場', note: '虎航 IT200' }
+                ]);
+                const flights = ref([
+                    { id: 1, date: '2027-03-11', flightNumber: 'IT200', airline: '台灣虎航', departureCode: 'TPE', arrivalCode: 'NRT', flightDuration: '3小時', depTime: '06:35', arrTime: '10:35', cabinBaggage: 10, checkedBaggage: 25, terminal: 'T1' }
+                ]);
+                const accommodations = ref([
+                    { id: 1, name: '上野三井花園飯店', address: '東京都台東區上野3-24-6', checkIn: '15:00', checkOut: '11:00', note: '' }
+                ]);
+                const expenses = ref([
+                    { id: 1, day: 1, category: '交通', title: 'Skyliner 車票', amountJPY: 2570, note: '' }
+                ]);
+
+                // --- Firebase 雲端同步邏輯 ---
+                let db, auth, appId;
+
+                onMounted(async () => {
+                    try {
+                        // 初始化 Firebase (根據環境變數)
+                        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+                        if (!firebaseConfig) {
+                            console.warn("未檢測到 Firebase 設定，僅提供本地預覽體驗。");
+                            syncStatus.value = 'error';
+                            return;
+                        }
+                        
+                        const app = initializeApp(firebaseConfig);
+                        auth = getAuth(app);
+                        db = getFirestore(app);
+                        appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+                        // 進行身份驗證 (無感匿名登入)
+                        const initAuth = async () => {
+                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                                await signInWithCustomToken(auth, __initial_auth_token);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                        };
+                        await initAuth();
+
+                        // 監聽登入狀態並掛載即時資料庫
+                        onAuthStateChanged(auth, (user) => {
+                            if (!user) return;
+                            
+                            // 指向使用者的個人專屬雲端文件
+                            const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'tripData', 'main');
+                            
+                            onSnapshot(docRef, (snapshot) => {
+                                if (snapshot.exists()) {
+                                    // 有資料，進行覆蓋同步
+                                    isSyncingFromCloud.value = true;
+                                    const data = snapshot.data();
+                                    
+                                    if(data.exchangeRate) exchangeRate.value = data.exchangeRate;
+                                    if(data.budgetJPY) budgetJPY.value = data.budgetJPY;
+                                    if(data.itinerary) itinerary.value = data.itinerary;
+                                    if(data.flights) flights.value = data.flights;
+                                    if(data.accommodations) accommodations.value = data.accommodations;
+                                    if(data.expenses) expenses.value = data.expenses;
+                                    
+                                    syncStatus.value = 'saved';
+                                    
+                                    // 給 Vue 一點時間處理完響應後，解除雲端鎖定
+                                    setTimeout(() => { isSyncingFromCloud.value = false; }, 300);
+                                } else {
+                                    // 第一次使用，將預設範例資料上傳至雲端
+                                    saveToCloud(true);
+                                }
+                            }, (error) => {
+                                console.error("Firestore 同步錯誤:", error);
+                                syncStatus.value = 'error';
+                            });
+                        });
+                        
+                        // 設置 Vue 的全域監聽器，當使用者在畫面上操作資料時觸發上傳
+                        watch(
+                            [exchangeRate, budgetJPY, itinerary, flights, accommodations, expenses],
+                            () => { saveToCloud(false); },
+                            { deep: true }
+                        );
+
+                    } catch (e) {
+                        console.error("Firebase 初始化失敗:", e);
+                        syncStatus.value = 'error';
+                    }
+                });
+
+                // 上傳至雲端的函數
+                const saveToCloud = async (forceInitialSave = false) => {
+                    // 若這波改動是因為雲端下載而觸發的，則忽略不重複上傳 (除非強制存檔)
+                    if ((isSyncingFromCloud.value && !forceInitialSave) || !auth?.currentUser) return;
+                    
+                    syncStatus.value = 'saving';
+                    const docRef = doc(db, 'artifacts', appId, 'users', auth.currentUser.uid, 'tripData', 'main');
+                    
+                    const dataToSave = {
+                        exchangeRate: exchangeRate.value,
+                        budgetJPY: budgetJPY.value,
+                        itinerary: itinerary.value,
+                        flights: flights.value,
+                        accommodations: accommodations.value,
+                        expenses: expenses.value,
+                        lastUpdatedAt: Date.now()
+                    };
+                    
+                    try {
+                        await setDoc(docRef, dataToSave, { merge: true });
+                        syncStatus.value = 'saved';
+                    } catch (error) {
+                        console.error("雲端儲存失敗:", error);
+                        syncStatus.value = 'error';
+                    }
+                };
+
+                // --- UI 及其他互動邏輯 ---
+                const activeModal = ref(null);
+                const isFormModalOpen = ref(false);
+                const formType = ref('');
+                const formData = ref({});
+                const selectedItem = ref(null);
+                const activeDataType = ref('');
+
+                const filteredItinerary = computed(() => itinerary.value.filter(i => i.day === selectedDay.value).sort((a,b)=>a.time.localeCompare(b.time)));
+                const filteredExpenses = computed(() => expenseFilter.value === 'all' ? expenses.value : expenses.value.filter(e => e.day === expenseFilter.value));
+                const totalExpenseJPY = computed(() => expenses.value.reduce((s, e) => s + Number(e.amountJPY || 0), 0));
+                const remainingBudgetJPY = computed(() => budgetJPY.value - totalExpenseJPY.value);
+                const budgetPercentage = computed(() => budgetJPY.value ? Math.max(0, Math.min(100, (remainingBudgetJPY.value / budgetJPY.value) * 100)) : 0);
+                const formTitle = computed(() => (selectedItem.value ? '編輯' : '新增') + {rate:'匯率', budget:'預算', itinerary:'行程', flight:'航班', accommodation:'住宿', expense:'記帳'}[formType.value]);
+                const selectedItemTitle = computed(() => selectedItem.value?.title || selectedItem.value?.name || selectedItem.value?.flightNumber || '');
+
+                const getPageTitle = () => ({ cover: '旅程日誌', itinerary: '每日行程', info: '旅遊資訊', accounting: '旅遊記帳' }[currentTab.value]);
+                const formatMoney = (n) => Number(n).toLocaleString();
+                const toggleWalletPopup = () => { showWalletPopup.value = !showWalletPopup.value; if(showWalletPopup.value) setTimeout(()=>showWalletPopup.value=false, 3000); };
+                const getCategoryIcon = (c) => ({ '景點': 'fa-solid fa-camera-retro', '交通': 'fa-solid fa-train-subway', '購物': 'fa-solid fa-bag-shopping', '住宿': 'fa-solid fa-bed', '餐飲': 'fa-solid fa-utensils' }[c] || 'fa-solid fa-star');
+                
+                const closeModal = () => { activeModal.value = null; isFormModalOpen.value = false; selectedItem.value = null; };
+                const openActionModal = (type, item) => { activeDataType.value = type; selectedItem.value = item; activeModal.value = 'actionSheet'; };
+                const openAddInfoSheet = () => activeModal.value = 'addInfoSheet';
+                const openFormModal = (type, data = null) => { 
+                    formType.value = type; 
+                    isFormModalOpen.value = true; 
+                    selectedItem.value = data;
+                    if(data) formData.value = JSON.parse(JSON.stringify(data)); // Deep copy to prevent live editing
+                    else {
+                        if(type==='rate') formData.value = {rate: exchangeRate.value};
+                        else if(type==='budget') formData.value = {budgetJPY: budgetJPY.value};
+                        else if(type==='itinerary') formData.value = {day: selectedDay.value, time: '10:00', duration: '1小時', category: '景點', title: '', note: ''};
+                        else if(type==='expense') formData.value = {day: expenseFilter.value==='all'?1:expenseFilter.value, category: '餐飲', amountJPY: 0, title: '', note: ''};
+                        else if(type==='flight') formData.value = {flightNumber:'', terminal: 'T1', airline: '', departureCode:'', arrivalCode:'', depTime:'00:00', arrTime:'00:00', flightDuration:'3小時', cabinBaggage: 10, checkedBaggage: 20, date: '2027-03-11'};
+                        else if(type==='accommodation') formData.value = {name:'', address:'', checkIn:'15:00', checkOut:'11:00', note:''};
+                        else formData.value = {};
+                    }
+                    activeModal.value = null;
+                };
+
+                const handleEdit = () => openFormModal(activeDataType.value, selectedItem.value);
+                const handleDelete = () => {
+                    const list = {itinerary, flight: flights, accommodation: accommodations, expense: expenses}[activeDataType.value];
+                    if(list) list.value = list.value.filter(i => i.id !== selectedItem.value.id);
+                    closeModal();
+                };
+
+                const saveForm = () => {
+                    if(formType.value === 'rate') exchangeRate.value = Number(formData.value.rate);
+                    else if(formType.value === 'budget') budgetJPY.value = Number(formData.value.budgetJPY);
+                    else {
+                        const list = {itinerary, flight: flights, accommodation: accommodations, expense: expenses}[formType.value];
+                        if(selectedItem.value) {
+                            const idx = list.value.findIndex(i => i.id === selectedItem.value.id);
+                            list.value[idx] = {...formData.value};
+                        } else {
+                            list.value.push({...formData.value, id: Date.now()}); // 加上獨特ID
+                        }
+                    }
+                    closeModal();
+                };
+
+                // 匯出 PDF 功能
+                const exportToPDF = async () => {
+                    isExporting.value = true;
+                    const titles = document.querySelectorAll('.html2pdf__title');
+                    titles.forEach(t => t.style.display = 'block');
+                    await new Promise(resolve => setTimeout(resolve, 150));
+
+                    const element = document.getElementById('export-content');
+                    let fileName = '東京富士山之旅.pdf';
+                    if (currentTab.value === 'itinerary') fileName = `行程-第${selectedDay.value}天.pdf`;
+                    if (currentTab.value === 'info') fileName = '旅遊資訊.pdf';
+
+                    const opt = {
+                        margin:       [15, 10, 15, 10], 
+                        filename:     fileName,
+                        image:        { type: 'jpeg', quality: 0.98 },
+                        html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#F7F6F3' },
+                        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                    };
+
+                    html2pdf().set(opt).from(element).save().then(() => {
+                        titles.forEach(t => t.style.display = 'none');
+                        isExporting.value = false;
+                    }).catch(err => {
+                        console.error('PDF 產生錯誤:', err);
+                        titles.forEach(t => t.style.display = 'none');
+                        isExporting.value = false;
+                        alert('PDF 匯出失敗，請稍後再試。');
+                    });
+                };
+
+                return {
+                    currentTab, isViewMode, isExporting, syncStatus, tabs, showWalletPopup, toggleWalletPopup, getPageTitle, formatMoney,
+                    exchangeRate, budgetJPY, selectedDay, itinerary, filteredItinerary, getCategoryIcon, categories,
+                    flights, accommodations, expenseFilter, expenses, filteredExpenses, remainingBudgetJPY, budgetPercentage,
+                    activeModal, isFormModalOpen, formType, formData, formTitle, selectedItemTitle,
+                    openActionModal, openAddInfoSheet, openFormModal, closeModal, handleEdit, handleDelete, saveForm,
+                    exportToPDF
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
